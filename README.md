@@ -1,37 +1,45 @@
 # PawPal+ (Module 2 Project)
 
-You are building **PawPal+**, a Streamlit app that helps a pet owner plan care tasks for their pet.
+**PawPal+** is a Streamlit app that helps a busy pet owner plan daily care tasks across multiple pets, with intelligent scheduling, conflict detection, and recurring task management.
 
-## Scenario
+---
 
-A busy pet owner needs help staying consistent with pet care. They want an assistant that can:
+## Features
 
-- Track pet care tasks (walks, feeding, meds, enrichment, grooming, etc.)
-- Consider constraints (time available, priority, owner preferences)
-- Produce a daily plan and explain why it chose that plan
+### Core scheduling
+- **Priority-based daily plan** — tasks are ranked `high > medium > low`; within a tier, shorter tasks are scheduled first to maximise the number of completed items
+- **Time budget enforcement** — the owner sets available minutes for the day; any task that doesn't fit is moved to a "Skipped" list with a plain-language explanation
+- **Multi-pet support** — add as many pets as needed; the scheduler pulls tasks from all pets and assigns each scheduled task to the correct pet
 
-Your job is to design the system first (UML), then implement the logic in Python, then connect it to the Streamlit UI.
-
-## What you will build
-
-Your final app should:
-
-- Let a user enter basic owner + pet info
-- Let a user add/edit tasks (duration + priority at minimum)
-- Generate a daily schedule/plan based on constraints and priorities
-- Display the plan clearly (and ideally explain the reasoning)
-- Include tests for the most important scheduling behaviors
-
-## Smarter Scheduling
-
-The scheduler includes four algorithmic improvements beyond basic priority ordering:
+### Smarter scheduling algorithms
 
 | Feature | Method | What it does |
 |---|---|---|
-| **Sorting** | `Scheduler.sort_by_time(tasks)` | Returns tasks sorted ascending by `duration_minutes` using a `lambda` key, so the lightest work items are always visible first |
-| **Filtering** | `Scheduler.filter_tasks(pet_name, completed)` | Returns `(task, pet)` pairs filtered by pet name and/or completion status — combinable in any way |
-| **Recurring tasks** | `Task.next_occurrence()` + `Scheduler.advance_recurring_tasks()` | When a `daily`/`weekly` task is marked complete, `next_occurrence()` creates a fresh copy with `due_date + timedelta` and `advance_recurring_tasks()` swaps it in place across all pets |
-| **Conflict detection** | `Scheduler.detect_conflicts(plan)` | Performs a pairwise O(n²) overlap check on all scheduled time windows and returns warning strings (rather than raising exceptions) for any pair whose intervals intersect |
+| **Sort by duration** | `Scheduler.sort_by_time(tasks)` | Returns tasks ordered shortest-first using a `lambda` key on `duration_minutes` |
+| **Filter tasks** | `Scheduler.filter_tasks(pet_name, completed)` | Returns `(task, pet)` pairs filtered by pet name and/or completion status — combinable |
+| **Recurring tasks** | `Task.next_occurrence()` + `Scheduler.advance_recurring_tasks()` | When a `daily`/`weekly` task is marked complete, creates a fresh copy due `timedelta(days=1)` or `timedelta(weeks=1)` later and swaps it in place |
+| **Conflict detection** | `Scheduler.detect_conflicts(plan)` | Pairwise O(n²) interval check; returns warning strings for any overlapping time windows without crashing |
+
+### UI highlights
+- Sorted task overview table (all pets, shortest-first) always visible before scheduling
+- Conflict warnings surfaced as `st.error` / `st.warning` banners immediately after plan generation
+- Inline due-date display on every task card
+- One-click "Roll over recurring tasks" button advances all completed daily/weekly tasks to their next occurrence
+
+---
+
+## 📸 Demo
+
+> _Run the app locally and take a screenshot, then embed it here using:_
+
+```html
+<a href="/course_images/ai110/pawpal_screenshot.png" target="_blank">
+  <img src='/course_images/ai110/pawpal_screenshot.png' title='PawPal App'
+       width='' alt='PawPal App' class='center-block' />
+</a>
+```
+
+---
 
 ## Testing PawPal+
 
@@ -41,7 +49,7 @@ Run the full test suite from the project root:
 python -m pytest
 ```
 
-Or with verbose output to see each test name:
+With verbose output:
 
 ```bash
 python -m pytest tests/test_pawpal.py -v
@@ -51,21 +59,38 @@ python -m pytest tests/test_pawpal.py -v
 
 | Category | # Tests | What is verified |
 |---|---|---|
-| **Task lifecycle** | 3 | `mark_complete()` changes status; completed tasks are excluded from the plan; `reset()` restores pending state |
-| **Pet task management** | 4 | `add_task()` increases count; all added tasks appear; `remove_task()` shrinks list; `pending_tasks()` excludes completed |
+| **Task lifecycle** | 3 | `mark_complete()` changes status; completed tasks excluded from plan; `reset()` restores pending |
+| **Pet task management** | 4 | `add_task()` increases count; all tasks stored; `remove_task()` shrinks list; `pending_tasks()` excludes completed |
 | **Owner aggregation** | 4 | `add_pet()` registers pets; `get_all_tasks()` merges across pets; `get_pending_tasks()` skips completed; `find_pet()` is case-insensitive |
-| **Core scheduling** | 5 | Plan built from owner's pets; time budget enforced; high priority scheduled first; completed tasks skipped; tasks excluded correctly |
-| **Sorting** | 2 | Tasks sorted ascending by `duration_minutes`; empty list handled |
-| **Filtering** | 4 | Filter by pet name; filter by status; combined filters; non-existent pet returns empty |
-| **Recurring tasks** | 6 | Daily advances +1 day; weekly advances +7 days; as-needed returns None; next occurrence resets `completed`; `advance_recurring_tasks()` swaps tasks in place; as-needed tasks not replaced |
-| **Conflict detection** | 4 | Exact overlap flagged; sequential tasks (no gap) pass; partial overlap flagged; empty plan returns no warnings |
-| **Edge cases** | 8 | Chronological start-time order; no pets → empty plan; pet with no tasks; `available_minutes=0` skips all; empty sort list; non-existent pet filter; case-insensitive pet filter; exact budget fill |
+| **Core scheduling** | 5 | Plan built from owner's pets; time budget enforced; high priority first; completed tasks skipped |
+| **Sorting** | 2 | Ascending duration order; empty list handled |
+| **Filtering** | 4 | By pet name; by status; combined; non-existent pet returns empty |
+| **Recurring tasks** | 6 | Daily +1 day; weekly +7 days; as-needed → None; next occurrence resets `completed`; `advance_recurring_tasks()` swaps in place; as-needed not replaced |
+| **Conflict detection** | 4 | Exact overlap flagged; sequential (touching) slots pass; partial overlap flagged; empty plan returns no warnings |
+| **Edge cases** | 8 | Chronological order; no pets → empty plan; pet with no tasks; `available_minutes=0`; empty sort; non-existent pet filter; case-insensitive filter; exact budget boundary |
+
+**Total: 39 tests, all passing.**
 
 ### Confidence level
 
-★★★★☆ (4/5)
+★★★★☆ (4/5) — Core scheduling invariants are thoroughly covered with both happy-path and edge-case tests. The remaining gap is integration-level testing of the Streamlit UI layer and multi-pet parallel scheduling scenarios.
 
-The scheduler's core invariants — priority ordering, time budget enforcement, recurring task rollover, and conflict detection — are all covered with both happy-path and edge-case tests. The main gap is integration-level testing of the Streamlit UI layer (which is not yet tested) and multi-pet parallel scheduling scenarios.
+---
+
+## Project structure
+
+```
+pawpal_system.py   # Domain model + Scheduler (logic layer)
+app.py             # Streamlit UI
+main.py            # CLI demo script
+tests/
+  test_pawpal.py   # 39 automated tests
+uml.md             # Final Mermaid class diagram
+reflection.md      # Design and AI collaboration reflection
+requirements.txt
+```
+
+---
 
 ## Getting started
 
@@ -75,6 +100,18 @@ The scheduler's core invariants — priority ordering, time budget enforcement, 
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+```
+
+### Run the app
+
+```bash
+streamlit run app.py
+```
+
+### Run the CLI demo
+
+```bash
+python main.py
 ```
 
 ### Suggested workflow
