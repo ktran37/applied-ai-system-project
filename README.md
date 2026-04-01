@@ -30,14 +30,17 @@
 
 ## 📸 Demo
 
-> _Run the app locally and take a screenshot, then embed it here using:_
+**Owner & pet setup**
 
-```html
-<a href="/course_images/ai110/pawpal_screenshot.png" target="_blank">
-  <img src='/course_images/ai110/pawpal_screenshot.png' title='PawPal App'
-       width='' alt='PawPal App' class='center-block' />
-</a>
-```
+<a href="screenshot_1.png" target="_blank"><img src='screenshot_1.png' title='PawPal App — Owner and Pet setup' width='' alt='PawPal App owner and pet setup' class='center-block' /></a>
+
+**Sorted task overview**
+
+<a href="screenshot_2.png" target="_blank"><img src='screenshot_2.png' title='PawPal App — Sorted task overview' width='' alt='PawPal App sorted task overview' class='center-block' /></a>
+
+**Generated daily schedule**
+
+<a href="screenshot_3.png" target="_blank"><img src='screenshot_3.png' title='PawPal App — Generated schedule' width='' alt='PawPal App generated schedule' class='center-block' /></a>
 
 ---
 
