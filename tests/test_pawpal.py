@@ -1,7 +1,9 @@
 """Tests for PawPal+ core logic."""
 
+from datetime import datetime, timedelta
+
 import pytest
-from pawpal_system import DailyPlan, Owner, Pet, Scheduler, Task
+from pawpal_system import DailyPlan, Owner, Pet, ScheduledTask, Scheduler, Task
 
 
 # ---------------------------------------------------------------------------
@@ -203,3 +205,217 @@ def test_scheduler_skips_completed_tasks():
     titles = [st.task.title for st in plan.scheduled]
     assert "Old task" not in titles
     assert "New task" in titles
+
+
+# ---------------------------------------------------------------------------
+# Sorting tests
+# ---------------------------------------------------------------------------
+
+
+def test_sort_by_time_returns_ascending_duration():
+    """sort_by_time() should order tasks from shortest to longest duration."""
+    owner = Owner("Jordan")
+    pet = Pet("Mochi", "dog")
+    owner.add_pet(pet)
+    tasks = [
+        Task("Long",   duration_minutes=60),
+        Task("Short",  duration_minutes=5),
+        Task("Medium", duration_minutes=20),
+    ]
+    result = Scheduler(owner).sort_by_time(tasks)
+    durations = [t.duration_minutes for t in result]
+    assert durations == sorted(durations)
+
+
+def test_sort_by_time_preserves_all_tasks():
+    """sort_by_time() should not drop any tasks."""
+    owner = Owner("Jordan")
+    owner.add_pet(Pet("Mochi", "dog"))
+    tasks = [Task(f"Task {i}", duration_minutes=i * 5 + 1) for i in range(6)]
+    result = Scheduler(owner).sort_by_time(tasks)
+    assert len(result) == len(tasks)
+
+
+# ---------------------------------------------------------------------------
+# Filtering tests
+# ---------------------------------------------------------------------------
+
+
+def test_filter_tasks_by_pet_name():
+    """filter_tasks(pet_name=...) should return only that pet's tasks."""
+    owner = Owner("Jordan")
+    mochi = Pet("Mochi", "dog")
+    noodle = Pet("Noodle", "cat")
+    mochi.add_task(Task("Walk", duration_minutes=20))
+    noodle.add_task(Task("Feed", duration_minutes=5))
+    owner.add_pet(mochi)
+    owner.add_pet(noodle)
+
+    result = Scheduler(owner).filter_tasks(pet_name="Mochi")
+    assert all(pet.name == "Mochi" for _, pet in result)
+    assert len(result) == 1
+
+
+def test_filter_tasks_by_completed_status():
+    """filter_tasks(completed=True) should return only completed tasks."""
+    owner = Owner("Jordan")
+    pet = Pet("Mochi", "dog")
+    done = Task("Done", duration_minutes=10)
+    done.mark_complete()
+    pending = Task("Pending", duration_minutes=10)
+    pet.add_task(done)
+    pet.add_task(pending)
+    owner.add_pet(pet)
+
+    result = Scheduler(owner).filter_tasks(completed=True)
+    assert all(task.completed for task, _ in result)
+    assert len(result) == 1
+
+
+def test_filter_tasks_combined():
+    """filter_tasks with both pet_name and completed should apply both filters."""
+    owner = Owner("Jordan")
+    mochi = Pet("Mochi", "dog")
+    t1 = Task("Walk", duration_minutes=20)
+    t1.mark_complete()
+    t2 = Task("Feed", duration_minutes=5)
+    mochi.add_task(t1)
+    mochi.add_task(t2)
+    owner.add_pet(mochi)
+
+    result = Scheduler(owner).filter_tasks(pet_name="Mochi", completed=False)
+    titles = [t.title for t, _ in result]
+    assert titles == ["Feed"]
+
+
+# ---------------------------------------------------------------------------
+# Recurring task tests
+# ---------------------------------------------------------------------------
+
+
+def test_next_occurrence_daily_advances_one_day():
+    """next_occurrence() for a daily task should set due_date to today + 1."""
+    from datetime import date, timedelta
+    task = Task("Walk", duration_minutes=20, frequency="daily")
+    nxt = task.next_occurrence()
+    assert nxt is not None
+    assert nxt.due_date == task.due_date + timedelta(days=1)
+
+
+def test_next_occurrence_weekly_advances_seven_days():
+    """next_occurrence() for a weekly task should set due_date to today + 7."""
+    from datetime import timedelta
+    task = Task("Grooming", duration_minutes=15, frequency="weekly")
+    nxt = task.next_occurrence()
+    assert nxt is not None
+    assert nxt.due_date == task.due_date + timedelta(weeks=1)
+
+
+def test_next_occurrence_as_needed_returns_none():
+    """next_occurrence() for an as-needed task should return None."""
+    task = Task("Vet visit", duration_minutes=60, frequency="as-needed")
+    assert task.next_occurrence() is None
+
+
+def test_next_occurrence_resets_completed_flag():
+    """The new occurrence should start as not completed."""
+    task = Task("Walk", duration_minutes=20, frequency="daily")
+    task.mark_complete()
+    nxt = task.next_occurrence()
+    assert nxt is not None
+    assert nxt.completed is False
+
+
+def test_advance_recurring_tasks_replaces_completed_tasks():
+    """advance_recurring_tasks() should roll forward completed recurring tasks."""
+    from datetime import timedelta
+    owner = Owner("Jordan")
+    pet = Pet("Mochi", "dog")
+    task = Task("Walk", duration_minutes=20, frequency="daily")
+    original_due = task.due_date
+    pet.add_task(task)
+    owner.add_pet(pet)
+
+    task.mark_complete()
+    new_tasks = Scheduler(owner).advance_recurring_tasks()
+
+    assert len(new_tasks) == 1
+    assert new_tasks[0].completed is False
+    assert new_tasks[0].due_date == original_due + timedelta(days=1)
+
+
+def test_advance_recurring_tasks_skips_as_needed():
+    """advance_recurring_tasks() should not replace as-needed tasks."""
+    owner = Owner("Jordan")
+    pet = Pet("Mochi", "dog")
+    task = Task("Vet", duration_minutes=60, frequency="as-needed")
+    task.mark_complete()
+    pet.add_task(task)
+    owner.add_pet(pet)
+
+    new_tasks = Scheduler(owner).advance_recurring_tasks()
+    assert len(new_tasks) == 0
+
+
+# ---------------------------------------------------------------------------
+# Conflict detection tests
+# ---------------------------------------------------------------------------
+
+
+def _make_conflict_plan(owner: Owner, pet: Pet, offset_minutes: int = 0) -> DailyPlan:
+    """Helper: build a DailyPlan with two overlapping ScheduledTasks."""
+    t1 = Task("Task A", duration_minutes=30)
+    t2 = Task("Task B", duration_minutes=20)
+    base = datetime.today().replace(hour=9, minute=0, second=0, microsecond=0)
+    plan = DailyPlan(owner=owner)
+    plan.scheduled.append(ScheduledTask(task=t1, pet=pet, start_time=base, reason="test"))
+    plan.scheduled.append(
+        ScheduledTask(task=t2, pet=pet, start_time=base + timedelta(minutes=offset_minutes), reason="test")
+    )
+    return plan
+
+
+def test_detect_conflicts_finds_overlap():
+    """detect_conflicts() should flag tasks with overlapping time windows."""
+    owner = Owner("Jordan")
+    pet = Pet("Rex", "dog")
+    owner.add_pet(pet)
+    plan = _make_conflict_plan(owner, pet, offset_minutes=0)  # exact same start
+
+    warnings = Scheduler(owner).detect_conflicts(plan)
+    assert len(warnings) >= 1
+    assert "Conflict" in warnings[0]
+
+
+def test_detect_conflicts_no_overlap_when_sequential():
+    """detect_conflicts() should return no warnings for sequential (non-overlapping) tasks."""
+    owner = Owner("Jordan")
+    pet = Pet("Rex", "dog")
+    owner.add_pet(pet)
+    # offset = 30 min, so Task A (30 min) ends exactly when Task B starts
+    plan = _make_conflict_plan(owner, pet, offset_minutes=30)
+
+    warnings = Scheduler(owner).detect_conflicts(plan)
+    assert warnings == []
+
+
+def test_detect_conflicts_partial_overlap():
+    """detect_conflicts() should catch a partial overlap (Task B starts mid-Task A)."""
+    owner = Owner("Jordan")
+    pet = Pet("Rex", "dog")
+    owner.add_pet(pet)
+    # Task A: 9:00–9:30, Task B starts at 9:15 → overlap
+    plan = _make_conflict_plan(owner, pet, offset_minutes=15)
+
+    warnings = Scheduler(owner).detect_conflicts(plan)
+    assert len(warnings) >= 1
+
+
+def test_detect_conflicts_empty_plan():
+    """detect_conflicts() should return no warnings for an empty plan."""
+    owner = Owner("Jordan")
+    owner.add_pet(Pet("Rex", "dog"))
+    plan = DailyPlan(owner=owner)
+
+    warnings = Scheduler(owner).detect_conflicts(plan)
+    assert warnings == []

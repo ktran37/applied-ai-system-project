@@ -22,6 +22,17 @@ Your final app should:
 - Display the plan clearly (and ideally explain the reasoning)
 - Include tests for the most important scheduling behaviors
 
+## Smarter Scheduling
+
+The scheduler includes four algorithmic improvements beyond basic priority ordering:
+
+| Feature | Method | What it does |
+|---|---|---|
+| **Sorting** | `Scheduler.sort_by_time(tasks)` | Returns tasks sorted ascending by `duration_minutes` using a `lambda` key, so the lightest work items are always visible first |
+| **Filtering** | `Scheduler.filter_tasks(pet_name, completed)` | Returns `(task, pet)` pairs filtered by pet name and/or completion status — combinable in any way |
+| **Recurring tasks** | `Task.next_occurrence()` + `Scheduler.advance_recurring_tasks()` | When a `daily`/`weekly` task is marked complete, `next_occurrence()` creates a fresh copy with `due_date + timedelta` and `advance_recurring_tasks()` swaps it in place across all pets |
+| **Conflict detection** | `Scheduler.detect_conflicts(plan)` | Performs a pairwise O(n²) overlap check on all scheduled time windows and returns warning strings (rather than raising exceptions) for any pair whose intervals intersect |
+
 ## Getting started
 
 ### Setup

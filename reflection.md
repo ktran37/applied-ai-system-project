@@ -44,6 +44,10 @@ The scheduler is greedy: it processes tasks in sorted order and skips any task t
 
 This tradeoff is reasonable here because correctness of priority order matters more than maximizing the number of tasks completed. A pet owner would rather finish every high-priority item and skip a low-priority one than reorder tasks to fit in one extra low-priority activity at the expense of a high-priority one.
 
+**Conflict detection tradeoff**
+
+The conflict detector uses a lightweight O(n²) pairwise check: it compares every pair of scheduled tasks and flags any two whose time windows overlap (`a.start_time < b.end_time and b.start_time < a.end_time`). This approach checks only exact time-window overlap and does not account for soft constraints like "Mochi needs a 10-minute rest between high-energy tasks." The advantage is simplicity — it returns plain warning strings without crashing the program, so the UI can surface conflicts gracefully. The disadvantage is that it does not prevent conflicts; it only reports them after the fact. A future improvement could integrate conflict checking directly into `build_plan()` to reject conflicting slots before they are assigned.
+
 ---
 
 ## 3. AI Collaboration
