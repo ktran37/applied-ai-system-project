@@ -419,3 +419,118 @@ def test_detect_conflicts_empty_plan():
 
     warnings = Scheduler(owner).detect_conflicts(plan)
     assert warnings == []
+
+
+# ---------------------------------------------------------------------------
+# Edge cases — chronological order, empty inputs, zero budget
+# ---------------------------------------------------------------------------
+
+
+def test_scheduled_tasks_are_in_chronological_order():
+    """Scheduled tasks in the DailyPlan should be ordered by start_time ascending."""
+    owner = Owner("Jordan", available_minutes=120)
+    pet = Pet("Mochi", "dog")
+    # Add tasks in random priority/duration order
+    pet.add_task(Task("Walk",    duration_minutes=30, priority="high"))
+    pet.add_task(Task("Feed",    duration_minutes=10, priority="high"))
+    pet.add_task(Task("Play",    duration_minutes=20, priority="medium"))
+    pet.add_task(Task("Groom",   duration_minutes=15, priority="low"))
+    owner.add_pet(pet)
+
+    plan = Scheduler(owner, start_hour=8).build_plan()
+    times = [st.start_time for st in plan.scheduled]
+    assert times == sorted(times), "Scheduled tasks must be in ascending start_time order"
+
+
+def test_owner_with_no_pets_produces_empty_plan():
+    """An owner with no pets should result in an empty scheduled plan."""
+    owner = Owner("Jordan", available_minutes=120)
+    plan = Scheduler(owner).build_plan()
+    assert plan.scheduled == []
+    assert plan.skipped == []
+
+
+def test_pet_with_no_tasks_does_not_break_scheduling():
+    """A pet with an empty task list should not interfere with other pets' scheduling."""
+    owner = Owner("Jordan", available_minutes=60)
+    empty_pet = Pet("Noodle", "cat")           # no tasks
+    active_pet = Pet("Mochi", "dog")
+    active_pet.add_task(Task("Walk", duration_minutes=20, priority="high"))
+    owner.add_pet(empty_pet)
+    owner.add_pet(active_pet)
+
+    plan = Scheduler(owner).build_plan()
+    assert len(plan.scheduled) == 1
+    assert plan.scheduled[0].task.title == "Walk"
+
+
+def test_zero_available_minutes_skips_all_tasks():
+    """Owner with available_minutes=0 should have every task skipped."""
+    owner = Owner("Jordan", available_minutes=0)
+    pet = Pet("Mochi", "dog")
+    pet.add_task(Task("Walk", duration_minutes=30, priority="high"))
+    pet.add_task(Task("Feed", duration_minutes=5,  priority="high"))
+    owner.add_pet(pet)
+
+    plan = Scheduler(owner).build_plan()
+    assert plan.scheduled == []
+    assert len(plan.skipped) == 2
+
+
+def test_sort_by_time_on_empty_list_returns_empty():
+    """sort_by_time() on an empty list should return an empty list without error."""
+    owner = Owner("Jordan")
+    owner.add_pet(Pet("Mochi", "dog"))
+    result = Scheduler(owner).sort_by_time([])
+    assert result == []
+
+
+def test_filter_tasks_with_nonexistent_pet_returns_empty():
+    """filter_tasks() with a pet name that doesn't exist should return an empty list."""
+    owner = Owner("Jordan")
+    pet = Pet("Mochi", "dog")
+    pet.add_task(Task("Walk", duration_minutes=20))
+    owner.add_pet(pet)
+
+    result = Scheduler(owner).filter_tasks(pet_name="Ghost")
+    assert result == []
+
+
+def test_filter_tasks_pet_name_is_case_insensitive():
+    """filter_tasks() should match pet names regardless of case."""
+    owner = Owner("Jordan")
+    pet = Pet("Mochi", "dog")
+    pet.add_task(Task("Walk", duration_minutes=20))
+    owner.add_pet(pet)
+
+    lower = Scheduler(owner).filter_tasks(pet_name="mochi")
+    upper = Scheduler(owner).filter_tasks(pet_name="MOCHI")
+    assert len(lower) == 1
+    assert len(upper) == 1
+
+
+def test_single_task_exactly_fills_budget_is_scheduled():
+    """A task whose duration equals available_minutes exactly should be scheduled."""
+    owner = Owner("Jordan", available_minutes=45)
+    pet = Pet("Mochi", "dog")
+    pet.add_task(Task("Long walk", duration_minutes=45, priority="high"))
+    owner.add_pet(pet)
+
+    plan = Scheduler(owner).build_plan()
+    assert len(plan.scheduled) == 1
+    assert plan.total_minutes == 45
+    assert plan.skipped == []
+
+
+def test_all_tasks_same_priority_scheduled_shortest_first():
+    """When priorities are equal, shorter tasks should be scheduled before longer ones."""
+    owner = Owner("Jordan", available_minutes=120)
+    pet = Pet("Mochi", "dog")
+    pet.add_task(Task("Long",   duration_minutes=40, priority="medium"))
+    pet.add_task(Task("Short",  duration_minutes=10, priority="medium"))
+    pet.add_task(Task("Medium", duration_minutes=25, priority="medium"))
+    owner.add_pet(pet)
+
+    plan = Scheduler(owner).build_plan()
+    durations = [st.task.duration_minutes for st in plan.scheduled]
+    assert durations == sorted(durations), "Equal-priority tasks should be ordered shortest-first"
