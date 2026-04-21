@@ -2,66 +2,65 @@
 
 ## Original Project
 
-**PawPal+** (Modules 1–3) is a Streamlit app that helps busy pet owners plan daily care tasks across multiple pets. It features a greedy priority-based scheduler, urgency-weighted scoring, conflict detection, recurring task rollover, and full JSON persistence — all backed by a clean domain model (Owner / Pet / Task / Scheduler) with 39 automated tests.
+**PawPal+** (Modules 1–3) is a Streamlit app that helps busy pet owners plan daily care tasks across multiple pets. It features a greedy priority-based scheduler, urgency-weighted scoring, conflict detection, recurring task rollover, and full JSON persistence — all backed by a clean domain model (`Owner / Pet / Task / Scheduler`) with 39 automated tests.
 
 This capstone extends PawPal+ with a fully integrated **agentic AI workflow** powered by the Claude API: a conversational assistant that interprets natural-language requests, calls tools to manage the real pet-care data, verifies its own actions, and reports a confidence score with every response.
+
+> See [model_card.md](model_card.md) for the full reflection on AI collaboration, biases, limitations, and testing results.
 
 ---
 
 ## Title and Summary
 
-**PawPal+ AI** — a pet care scheduling assistant that you can talk to.
+**PawPal+ AI** — a pet care scheduling assistant you can talk to.
 
-Instead of clicking through forms, owners can say *"Set up a daily routine for my new rabbit Biscuit"* and the AI will retrieve species-specific care facts from a knowledge base (RAG), create appropriate tasks, then verify the resulting schedule — all in one conversation turn. Every change the AI makes is persisted to `data.json` and immediately visible in the Pets & Tasks and Schedule tabs.
+Instead of clicking through forms, owners say *"Set up a daily routine for my new rabbit Biscuit"* and the AI retrieves species-specific care facts from a knowledge base (RAG), creates the appropriate tasks, then verifies the resulting schedule — all in one turn. Every change the AI makes is persisted to `data.json` and immediately visible in the Pets & Tasks and Schedule tabs.
 
 ---
 
 ## Architecture Overview
 
-```
-User (natural language)
-        │
-        ▼
-┌───────────────────────────────┐
-│       PawPal AI Agent         │  claude-sonnet-4-6
-│                               │  + prompt caching (system prompt)
-│   Agentic loop:               │
-│   1. Receive message          │
-│   2. Plan tool calls          │
-│   3. Execute tools            │
-│   4. Verify with get_schedule │
-│   5. Return response +        │
-│      confidence score         │
-└──────────────┬────────────────┘
-               │  Tool Use (7 tools)
-               ▼
-┌─────────────────────────────────────────────────────┐
-│                    Tool Layer                        │
-│                                                      │
-│  retrieve_care_tips  ──►  Species Knowledge Base     │
-│  (RAG retrieval)          dog / cat / rabbit / bird  │
-│                                                      │
-│  create_task          ──►  PawPal+ Domain Model      │
-│  complete_task             Owner · Pet · Task        │
-│  remove_task               + JSON Persistence        │
-│  get_pets                  (data.json)               │
-│  add_pet                                             │
-│  get_schedule         ──►  Scheduler                 │
-│                            (priority / weighted)     │
-└─────────────────────────────────────────────────────┘
-               │
-               ▼
-        Updated Owner state
-        auto-saved to data.json
-               │
-               ▼
-        Streamlit UI
-  (chat history · confidence score · tool log)
+> Full diagram with component descriptions: [assets/architecture.md](assets/architecture.md)
+
+```mermaid
+flowchart TD
+    U(["👤 User\n(natural language)"])
+    UI["🖥️ Streamlit UI\nchat · confidence · tool log"]
+
+    subgraph Agent["🤖 PawPal AI Agent  —  claude-sonnet-4-6"]
+        direction TB
+        L1["1 · Receive message"]
+        L2["2 · Plan tool calls"]
+        L3["3 · Execute tools"]
+        L4["4 · Verify with get_schedule"]
+        L5["5 · Return response + confidence"]
+        L1 --> L2 --> L3 --> L4 --> L5
+    end
+
+    subgraph ToolLayer["⚙️ Tool Layer"]
+        direction LR
+        RAG["retrieve_care_tips\n🔍 RAG"]
+        MUT["create / complete\nremove task"]
+        PET["get_pets\nadd_pet"]
+        SCH["get_schedule\n✅ verify"]
+    end
+
+    KB[("📚 Knowledge Base\ndog · cat · rabbit · bird")]
+    DM["📦 Domain Model\nOwner · Pet · Task · Scheduler"]
+    DB[("💾 data.json")]
+
+    U --> UI --> Agent --> ToolLayer
+    RAG --> KB
+    MUT --> DM
+    PET --> DM
+    SCH --> DM
+    DM --> DB
+    Agent --> UI --> U
 ```
 
-**Data flow**: User message → Claude reasons → calls tools → tool results feed back into Claude → Claude verifies with `get_schedule` → final text + confidence score returned to UI.
+**Data flow:** User message → Claude reasons → calls tools → results feed back into Claude → Claude calls `get_schedule` to verify → final text + confidence score returned to UI.
 
-**Human checkpoints**: The confidence score surfaces to the user on every response. Tool calls are shown in a collapsible expander so the user can see exactly what the AI did. All AI changes are immediately visible in the Pets & Tasks and Schedule tabs.
+**Human checkpoints:** Confidence score (🟢 ≥ 80% · 🟡 50–79% · 🔴 < 50%) and collapsible tool call log on every AI response. All changes immediately visible in other tabs.
 
 ---
 
@@ -69,11 +68,11 @@ User (natural language)
 
 | Feature | Implementation |
 |---|---|
-| **Agentic Workflow** | Claude calls tools repeatedly in a loop (plan → act → verify) until `stop_reason == "end_turn"`. The agent always calls `get_schedule` after mutations to verify its own work. |
-| **RAG** | `retrieve_care_tips` fetches curated species knowledge (essential tasks, health notes, tips) before the agent generates recommendations. Suggestions are grounded in retrieved facts, not model training data alone. |
-| **Confidence Scoring** | The system prompt instructs Claude to end every response with `CONFIDENCE: 0.X`. The score is parsed, displayed in the UI, and stored in session history. |
-| **Prompt Caching** | The system prompt is sent with `cache_control: ephemeral` to reduce token costs on repeated calls within the same session. |
-| **Logging & Guardrails** | Every user message, tool call, tool result, and agent response is logged via Python's `logging` module. Tool exceptions are caught and returned as JSON error objects instead of crashing. A `MAX_TOOL_LOOPS` guard prevents runaway agentic loops. |
+| **Agentic Workflow** | Claude calls tools in a loop until `stop_reason == "end_turn"`. The agent always calls `get_schedule` after mutations to verify its own work. |
+| **RAG** | `retrieve_care_tips` fetches curated species knowledge (essential tasks, health notes, tips) from a built-in store before generating recommendations. |
+| **Confidence Scoring** | System prompt requires `CONFIDENCE: 0.X` on every response. Parsed, clamped, and displayed in the UI. |
+| **Prompt Caching** | System prompt sent with `cache_control: ephemeral` — processed once per session, reducing latency and cost. |
+| **Logging & Guardrails** | Every tool call is logged. Tool exceptions return JSON error objects. `MAX_TOOL_LOOPS = 10` prevents runaway loops. |
 
 ---
 
@@ -94,11 +93,11 @@ source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 3. Set your API key
+### 3. Set your Anthropic API key
 
 ```bash
 cp .env.example .env
-# Edit .env and add your Anthropic API key
+# Open .env and paste your key
 export ANTHROPIC_API_KEY=your_key_here
 ```
 
@@ -114,15 +113,13 @@ $env:ANTHROPIC_API_KEY="your_key_here"
 streamlit run app.py
 ```
 
-Open `http://localhost:8501`, navigate to the **🤖 AI Assistant** tab, and start chatting.
+Open `http://localhost:8501` and navigate to the **🤖 AI Assistant** tab.
 
-### 5. Run all tests
+### 5. Run all tests (no API key required)
 
 ```bash
 python -m pytest -v
 ```
-
-The agent tests run without an API key (tool handlers are tested directly via mocks).
 
 ### 6. Run the CLI demo (optional)
 
@@ -132,143 +129,173 @@ python main.py
 
 ---
 
+## Demo Walkthrough
+
+> 📹 **[Loom walkthrough →](https://www.loom.com/share/REPLACE_WITH_YOUR_LOOM_LINK)**
+> *(Record a 2–3 min screen capture showing the three sample interactions below, then paste your Loom URL here before submitting.)*
+
+### Screenshot 1 — Owner & pet setup (Pets & Tasks tab)
+
+![PawPal App — Owner and pet setup](assets/screenshot_1.png)
+
+### Screenshot 2 — Sorted task overview
+
+![PawPal App — Sorted task overview](assets/screenshot_2.png)
+
+### Screenshot 3 — Generated daily schedule
+
+![PawPal App — Generated schedule](assets/screenshot_3.png)
+
+---
+
 ## Sample Interactions
 
-### Example 1 — Build a full routine from scratch
+### Interaction 1 — Build a full routine from scratch
 
-**User:** Set up a complete daily care routine for my new rabbit named Biscuit.
+**Input:** `Set up a complete daily care routine for my new rabbit named Biscuit.`
 
-**Agent actions (tool calls):**
-1. `retrieve_care_tips(species="rabbit")` → retrieves hay, water, greens, playtime, cleaning tasks
+**Agent tool calls:**
+1. `retrieve_care_tips(species="rabbit")` → fetches hay, water, greens, playtime, cleaning tasks from knowledge base
 2. `add_pet(name="Biscuit", species="rabbit", age_years=1.0)`
-3. `create_task(pet_name="Biscuit", title="Unlimited hay", duration_minutes=10, priority="high", frequency="daily")`
-4. `create_task(...)` × 5 more tasks
-5. `get_schedule()` → verifies 75 min scheduled, 0 conflicts
+3. `create_task(...)` × 6 tasks
+4. `get_schedule()` → verifies 75 min scheduled, 0 conflicts
 
-**Response:** *"I've set up Biscuit's daily routine with 6 tasks: hay replenishment, fresh water, pellets, leafy greens, supervised playtime, and a daily habitat spot-clean. The schedule fits in 75 minutes. Note: hay should always be available (80% of a rabbit's diet) — GI stasis is the #1 health risk."*
-`CONFIDENCE: 0.95`
+**AI response:**
+> I've set up Biscuit's daily routine with 6 tasks: unlimited hay (10 min), fresh water (5 min), pellet feeding (5 min), leafy greens (10 min), supervised playtime (30 min), and a daily spot-clean (15 min). The schedule fits in 75 minutes with no conflicts. Important: hay should always be available — it makes up 80% of a rabbit's diet and prevents GI stasis, the #1 health risk.
+>
+> `CONFIDENCE: 0.95`
 
 ---
 
-### Example 2 — Mark tasks done and check remaining schedule
+### Interaction 2 — Mark tasks done, check what remains
 
-**User:** Mochi finished her morning walk and breakfast. What's left for today?
+**Input:** `Mochi finished her morning walk and breakfast. What's left for today?`
 
-**Agent actions:**
+**Agent tool calls:**
 1. `complete_task(pet_name="Mochi", task_title="Morning walk")`
 2. `complete_task(pet_name="Mochi", task_title="Breakfast")`
-3. `get_schedule()` → 2 tasks remain: Playtime (20 min), Brushing (15 min)
+3. `get_schedule()` → 2 tasks remain
 
-**Response:** *"Done! I've marked Morning walk and Breakfast as complete for Mochi. Two tasks remain: Playtime (20 min, medium) and Brushing (15 min, low priority, weekly). Total remaining: 35 minutes."*
-`CONFIDENCE: 0.95`
+**AI response:**
+> Done! Marked Morning walk and Breakfast complete for Mochi. Two tasks remain: **Playtime** (20 min, medium priority) and **Brushing** (15 min, low priority, weekly). Total remaining: 35 minutes.
+>
+> `CONFIDENCE: 0.95`
 
 ---
 
-### Example 3 — Pet care advice question
+### Interaction 3 — Species care advice
 
-**User:** What are the most important things to know about caring for a bird?
+**Input:** `What are the most important things to know about caring for a bird?`
 
-**Agent actions:**
+**Agent tool calls:**
 1. `retrieve_care_tips(species="bird")` → health notes + tips retrieved
 
-**Response:** *"Key bird care facts from the knowledge base: (1) Non-stick cookware fumes (PTFE/Teflon) can be fatal — never cook with them near birds. (2) Birds hide illness; changes in droppings or feathers need vet attention immediately. (3) They need 10–12 hours of sleep in a quiet, dark space. (4) Toxic foods include avocado, chocolate, onion, and caffeine. For tasks, I'd recommend daily fresh food, water, spot-cleaning, out-of-cage time, and weekly deep cleans."*
-`CONFIDENCE: 0.85`
+**AI response:**
+> Key bird care facts from the knowledge base: **(1)** Non-stick cookware (PTFE/Teflon) fumes can be fatal — never use them near birds. **(2)** Birds hide illness; changes in droppings or feathers need immediate vet attention. **(3)** They need 10–12 hours of sleep in a quiet, dark space. **(4)** Toxic foods: avocado, chocolate, onion, caffeine. For a daily routine I'd suggest fresh food, water change, cage spot-clean, and 20 minutes of out-of-cage interaction — plus a weekly deep clean.
+>
+> `CONFIDENCE: 0.85`
 
 ---
 
 ## Design Decisions
 
-### Why agentic workflow over a simple Q&A chatbot?
+### Why an agentic workflow over a simple Q&A chatbot?
 
-A chatbot that just answers questions wouldn't actually change the pet schedule — it would only describe what *should* be done. The agentic loop lets Claude mutate the real data (add tasks, mark them done, remove them) and then verify the result by calling `get_schedule`. This means the AI becomes genuinely useful rather than advisory-only.
+A Q&A bot would only describe what *should* be done. The agentic loop lets Claude actually mutate the pet schedule and then verify the result — making it genuinely useful rather than advisory-only.
 
-**Trade-off**: Agentic calls are slower (multiple round-trips to Claude) and cost more tokens. A simple one-shot prompt would be faster but couldn't take actions.
+**Trade-off:** Agentic calls are slower (multiple round-trips) and cost more tokens than a one-shot prompt.
 
-### Why RAG for care tips instead of relying on Claude's training data?
+### Why RAG for care tips instead of relying on training data?
 
-Claude already knows a lot about pet care, but that knowledge is opaque and can drift between model versions. By storing tips in `_CARE_KNOWLEDGE` and retrieving them explicitly, the suggestions are auditable, editable, and consistent regardless of the model used. The system prompt instructs the agent to always call `retrieve_care_tips` before making recommendations — this enforces the retrieval step rather than hoping the model remembers to do it.
+Claude already knows pet care facts, but that knowledge is opaque and can drift between model versions. Storing tips in `_CARE_KNOWLEDGE` and retrieving them explicitly keeps suggestions auditable and consistent. The system prompt enforces the retrieval step rather than hoping the model remembers it.
 
-**Trade-off**: The knowledge base is small and hand-curated. A production system would use a vector store (e.g. pgvector + embeddings) for larger and more dynamic knowledge.
+**Trade-off:** The knowledge base is small and hand-curated. A production system would use a vector store (e.g. pgvector + embeddings) for larger, dynamic knowledge.
 
 ### Why confidence scores?
 
-Confidence scores give the user a quick reliability signal without reading the full response. The system prompt ties high scores (0.9+) to verified actions (i.e., `get_schedule` was called), which incentivises the agent to verify its own work.
+They give users a quick reliability signal and incentivise the agent to verify its own work — the system prompt ties 0.9+ to verified actions only.
 
-**Trade-off**: Claude's self-reported confidence is not calibrated probability — it is Claude's subjective assessment. It correlates with completeness but is not a statistical guarantee.
-
-### Why prompt caching?
-
-The system prompt is long (~400 tokens) and sent on every API call. Marking it `cache_control: ephemeral` means it is only processed once per session, reducing latency and cost on subsequent turns.
+**Trade-off:** Claude's self-reported confidence is not a calibrated probability; it is a subjective assessment.
 
 ### Why keep tool handlers as plain Python methods?
 
-The tool handlers (`_tool_create_task`, `_tool_get_schedule`, etc.) operate directly on the `Owner` domain object without any HTTP calls or external state. This makes them testable in milliseconds without mocking a database or network — `tests/test_ai_agent.py` runs the entire tool layer with no API key.
+They operate directly on the in-memory `Owner` object with no network calls, making them fully testable without mocking any external services.
 
 ---
 
 ## Testing Summary
 
-### Original PawPal+ tests (39 tests)
+### Run all 81 tests
 
 ```bash
-python -m pytest tests/test_pawpal.py -v
+python -m pytest -v
 ```
 
-All 39 pass. Coverage: Task lifecycle, Pet management, Owner aggregation, Scheduler (standard + weighted), sorting, filtering, recurring tasks, conflict detection, and 8 edge cases.
+| Suite | Tests | Result |
+|---|---|---|
+| `tests/test_ai_agent.py` | 35 | ✅ all pass |
+| `tests/test_pawpal.py` | 46 | ✅ all pass |
 
-### New AI agent tests (32 tests)
-
-```bash
-python -m pytest tests/test_ai_agent.py -v
-```
+### Agent test categories (35 tests)
 
 | Category | Tests | What is verified |
 |---|---|---|
-| `get_pets` | 3 | Returns all pets with task details; handles empty owner |
+| `get_pets` | 3 | Returns all pets with details; handles empty owner |
 | `add_pet` | 3 | Adds pet; blocks duplicate; defaults age to 0 |
 | `create_task` | 3 | Creates task; error on unknown pet; stores description |
 | `complete_task` | 4 | Marks done; case-insensitive; error on unknown pet/task |
 | `remove_task` | 3 | Removes task; errors on unknown pet/task |
 | `get_schedule` | 3 | Returns structure; respects budget; weighted flag works |
-| `retrieve_care_tips` | 4 | Returns data for all 5 species; knowledge base completeness |
-| Tool dispatch | 2 | Unknown tool name returns error; exceptions caught gracefully |
-| Confidence parsing | 6 | Parses correctly; case-insensitive; clamped; defaults to 0.5 |
-| Confidence stripping | 3 | Removes trailing line; preserves body; no-op when absent |
+| `retrieve_care_tips` | 4 | All 5 species; knowledge base completeness |
+| Tool dispatch | 2 | Unknown tool name; exceptions caught as JSON errors |
+| Confidence parsing | 6 | Parses correctly; case-insensitive; clamped to [0, 1]; defaults to 0.5 |
+| Confidence stripping | 3 | Removes trailing line; preserves body |
 | Conversation reset | 1 | Clears history and tool log |
 
-**What worked**: Directly testing tool handlers without the Claude API keeps tests fast (~0.3 s total) and fully deterministic. Confidence parsing tests caught a bug where the regex was anchored too tightly.
+**What worked:** Testing tool handlers directly (no API key needed) keeps tests fast (~0.3 s) and fully deterministic.
 
-**What didn't**: The initial `test_execute_tool_handles_exception_gracefully` was flaky because Python's `int()` actually coerces the string `"not-an-int"` before the type hint check fires. Test was updated to assert either outcome is acceptable.
+**Surprise:** The initial confidence regex `\bCONFIDENCE:` failed when the line had leading whitespace. Switching to `re.search` fixed it.
 
-**What's not tested**: The full `process_message` agentic loop (requires a real API key and live Claude responses). This is acceptable — the loop logic is simple (a `while` loop with two branches) and the interesting logic lives in the tool handlers, which are fully tested.
+> See [model_card.md](model_card.md) for the full testing narrative and AI collaboration reflection.
 
 ---
 
 ## Reflection and Ethics
 
-### Limitations and biases
+### Limitations
 
-- **Knowledge base is static and hand-curated.** It reflects general best practices but not every breed, health condition, or geographic context (e.g. climate affects walk timing for dogs). A veterinarian's advice should always take precedence.
-- **Confidence scores are not calibrated.** Claude's self-assessment can be overconfident on tasks where it cannot actually verify success (e.g. if a task was marked complete but the owner didn't actually do it).
-- **No authentication.** The app stores all pet data in a local `data.json` file with no access control. In a multi-user deployment this would need proper user isolation.
-- **English only.** The system prompt and knowledge base are English-only; non-English users would get degraded results.
+- Care tips are static and hand-curated; they don't reflect individual breed or health differences.
+- Confidence scores are self-reported by Claude, not statistically calibrated.
+- English-only; no access control for multi-user deployments.
 
 ### Potential misuse and prevention
 
-The AI can delete tasks or mark them complete without the owner actually performing them — this could lead to missed care if an owner relied on the AI's history log without verifying. Mitigations built in:
-
-1. All AI actions are logged and displayed in the tool call expander so they are transparent.
-2. The data is auto-saved, but `data.json` is human-readable and can be manually corrected.
-3. A future version could add a confirmation step for destructive actions (remove_task).
-
-The system has no medical advice capability — the knowledge base contains care tips, not diagnoses. This boundary is intentional and should remain.
-
-### Surprises during testing
-
-The most surprising finding was that the agent consistently called `get_schedule` *after* creating tasks even when not explicitly asked to verify — a behaviour that emerged from the system prompt instruction *"After creating tasks, call get_schedule to verify"* combined with Claude's tendency to follow multi-step instructions reliably. The confidence scores also self-calibrated naturally: responses where the agent had called `get_schedule` (and thus had real data) consistently scored 0.9+, while pure Q&A responses scored 0.8 or below.
+All AI actions are logged and surfaced in the UI tool call expander. `data.json` is human-readable. A future version could add a confirmation step before destructive actions.
 
 ### AI collaboration
 
-**Helpful instance**: When drafting the `_CARE_KNOWLEDGE` dictionary, Claude suggested adding a `health_notes` key alongside `essential_tasks` and `tips` — separating *what to watch out for* from *what to do daily*. This three-key structure made it much easier for the agent to give nuanced responses (e.g. warning about GI stasis in rabbits) without conflating health risks with routine tasks. It was a clean structural improvement that I adopted immediately.
+**Helpful suggestion:** Claude proposed splitting care tips into three keys (`essential_tasks`, `health_notes`, `tips`). This let the agent lead with critical health warnings (e.g. GI stasis in rabbits) rather than burying them in a flat list.
 
-**Flawed instance**: Claude initially generated the `SYSTEM_PROMPT` with the instruction *"Rate your confidence 1–10"* using an integer scale. This caused the regex `[\d.]+` to correctly parse `8` as `0.08` (since it expected a decimal like `0.8`). The confidence scores were all near-zero until I caught the mismatch and changed the prompt to explicitly require the `0.X` decimal format. The AI's suggested prompt was internally consistent but incompatible with the parsing code it also helped write — a reminder to always test the full pipeline, not just individual components.
+**Flawed suggestion:** Claude drafted the system prompt with *"rate confidence 1–10"* (integer). My regex expected a decimal (`0.9`), so `float("8")` → `8.0` → clamped to `1.0`: every response appeared 100% confident. Fixed by changing the prompt to require the `0.X` format. Lesson: always test the full pipeline end-to-end.
+
+---
+
+## Project Structure
+
+```
+ai_agent.py          # PawPalAgent — Claude agentic loop + 7 tools + RAG knowledge base
+app.py               # Streamlit UI — 3 tabs: Pets & Tasks / Schedule / AI Assistant
+pawpal_system.py     # Domain model + Scheduler (no UI dependencies)
+main.py              # CLI demo (tabulate output)
+model_card.md        # Full reflection: AI collaboration, biases, testing, ethics
+tests/
+  test_ai_agent.py   # 35 agent tests (no API key required)
+  test_pawpal.py     # 46 domain model tests
+assets/
+  architecture.md    # Mermaid system diagram + component table
+  screenshot_1.png   # Owner & pet setup
+  screenshot_2.png   # Sorted task overview
+  screenshot_3.png   # Generated daily schedule
+requirements.txt
+.env.example
+```
